@@ -1,65 +1,38 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
+#include <iostream>
+#include <libusb-1.0/libusb.h>
 
-#include "libusb.h"
-
-static int count = 0;
-
-int hotplug_callback(struct libusb_context *ctx, struct libusb_device *dev,
-                     libusb_hotplug_event event, void *user_data) {
-    static libusb_device_handle *dev_handle = NULL;
-    struct libusb_device_descriptor desc;
-    int rc;
-
-    (void)libusb_get_device_descriptor(dev, &desc);
-
-    if (LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED == event) {
-        rc = libusb_open(dev, &dev_handle);
-        if (LIBUSB_SUCCESS != rc) {
-            printf("Could not open USB device\n");
-        }
-    } else if (LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT == event) {
-        if (dev_handle) {
-            libusb_close(dev_handle);
-            dev_handle = NULL;
-        }
-    } else {
-        printf("Unhandled event %d\n", event);
-    }
-    count++;
-
+auto hotplug_callback(
+    libusb_context *ctx,
+    libusb_device *device,
+    libusb_hotplug_event event,
+    void *user_data
+) -> int {
+    std::cout<<"New device arrived!\n";
     return 0;
 }
 
-int main (void) {
-    libusb_hotplug_callback_handle callback_handle;
-    int rc;
+auto main() -> int {
+    libusb_context *context = nullptr;
+    libusb_init(&context);
 
-    /* check for hotplug support */
-    if (!libusb_has_capability(LIBUSB_CAP_HAS_CAPABILITY))
-        printf("Library somehow not supported\n");
+    libusb_hotplug_callback_handle hotplug_callback_handle;
+    libusb_hotplug_register_callback(
+          context,
+          LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED,
+          LIBUSB_HOTPLUG_ENUMERATE,
+          0x31cf, 0x5740,
+          LIBUSB_HOTPLUG_MATCH_ANY,
+          hotplug_callback, nullptr,
+          &hotplug_callback_handle
+    );
 
-    libusb_init_context(NULL, NULL, 0);
-
-    rc = libusb_hotplug_register_callback(NULL, LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
-                                          LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT, 0, 0x045a, 0x5005,
-                                          LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback, NULL,
-                                          &callback_handle);
-    if (LIBUSB_SUCCESS != rc) {
-        printf("Error creating a hotplug callback\n");
-        libusb_exit(NULL);
-        return EXIT_FAILURE;
+    while (true) {
+        if (libusb_handle_events(context) < 0)
+            break;
     }
 
-    while (count < 2) {
-        libusb_handle_events_completed(NULL, NULL);
-        timespec a{0, 10000000UL};
-        nanosleep(&a, NULL);
-    }
-
-    libusb_hotplug_deregister_callback(NULL, callback_handle);
-    libusb_exit(NULL);
+    libusb_hotplug_deregister_callback(context, hotplug_callback_handle);
+    libusb_exit(context);
 
     return 0;
 }

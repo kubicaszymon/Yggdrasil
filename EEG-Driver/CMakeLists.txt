@@ -15,6 +15,8 @@ if(WIN32)
             GIT_TAG        v1.0.30-0
     )
     FetchContent_MakeAvailable(libusb_cmake)
+endif()
 
+if(WIN32 OR UNIX)
     target_link_libraries(EEG_Driver PRIVATE usb-1.0)
 endif()
