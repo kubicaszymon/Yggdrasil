@@ -39,5 +39,6 @@ goto :eof
 :detach
 REM detach and unbind
 usbipd detach --busid %BUSID%
+timeout 1
 usbipd unbind --busid %BUSID%
 goto :eof
