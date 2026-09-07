@@ -34,6 +34,8 @@ usbipd bind --busid %BUSID%
 
 REM attach shared usb to wsl2
 usbipd attach --wsl --busid %BUSID%
+
+REM if you now see device on wsl but can't open check permission of this bus
 goto :eof
 
 :detach
