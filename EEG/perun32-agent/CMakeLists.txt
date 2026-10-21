@@ -1,5 +1,3 @@
-add_executable(EEG main.cpp)
+add_executable(perun32-agent main.cpp)
 
-if(WIN32 OR UNIX)
-    target_link_libraries(EEG PRIVATE usb-1.0)
-endif()
+target_link_libraries(perun32-agent libperun32)
