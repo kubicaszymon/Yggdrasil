@@ -95,7 +95,7 @@ static void Init()
 }
 */
 
-#include "libperun32.h"
+#include "../libperun32/include/libperun32.h"
 
 int main() {
     /*

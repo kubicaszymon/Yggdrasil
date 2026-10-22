@@ -5,12 +5,11 @@
 #ifndef libperun32_API
 #define libperun32_API
 #include <memory>
+#include <optional>
 
 class Perun32 {
     public:
     Perun32();
-
-    void Enumerate();
 
     private:
     struct pImplPerun32;

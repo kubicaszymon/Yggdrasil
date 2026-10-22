@@ -11,12 +11,7 @@ if(WIN32)
 endif()
 
 add_library(libperun32 STATIC
-        api/libperun32.h
+        include/libperun32.h
         source/libperun32.cpp
 )
 
-
-target_include_directories(libperun32
-        PUBLIC api
-        PRIVATE include
-)
