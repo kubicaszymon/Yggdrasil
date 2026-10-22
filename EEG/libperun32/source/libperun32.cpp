@@ -5,6 +5,8 @@
 #include "../include/libperun32.h"
 #include <libusb-1.0/libusb.h>
 
+#include <iostream>
+
 struct Perun32::pImplPerun32 {
 
     // VID and PID of perun32 amp
@@ -71,4 +73,11 @@ Perun32::pImplPerun32::~pImplPerun32() {
 Perun32::Perun32()
     : pImpl(std::make_unique<Perun32::pImplPerun32>()) {
 }
+
+/*
+* why here? because if i would not put it there, the compiler would generate default destructor in the class declaration (.h file),
+* and such destructor will try to delete pImpl unique_ptr and because i made it as incomplete struct declaration (PImpl),
+* the destructor in .h file would not determine the overall size of object thus it needs to be done here where the PImpl type is completed.
+*/
+Perun32::~Perun32() = default;
 

@@ -11,7 +11,7 @@ if /i "%~1"=="-Detach" set "ACTION=detach"
 REM list usb
 usbipd list
 
-set /p "BUSID=Enter Perun bus-id:"
+set /p "BUSID=Enter Perun bus-id: "
 
 if not defined BUSID (
    echo no bus-id given.

@@ -15,3 +15,5 @@ add_library(libperun32 STATIC
         source/libperun32.cpp
 )
 
+target_link_libraries(libperun32 PRIVATE usb-1.0)
+

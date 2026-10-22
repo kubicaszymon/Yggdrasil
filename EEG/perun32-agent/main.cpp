@@ -114,7 +114,6 @@ int main() {
     */
 
     Perun32 lib;
-    lib.Enumerate();
 
     return 0;
 }

@@ -10,6 +10,7 @@
 class Perun32 {
     public:
     Perun32();
+    virtual ~Perun32();
 
     private:
     struct pImplPerun32;
