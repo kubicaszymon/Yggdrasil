@@ -1,4 +1,6 @@
 #include <iostream>
+
+/*
 #include <vector>
 #include <bitset>
 #include <libusb-1.0/libusb.h>
@@ -91,8 +93,12 @@ static void Init()
         std::cout << "no devices found.\n";
     }
 }
+*/
+
+#include "../libperun32/include/libperun32.h"
 
 int main() {
+    /*
     const libusb_version* version = libusb_get_version();
     std::cout << "libusb version: " << version->major << "." << version->minor << "." << version->micro << "." << version->nano << "\n";
 
@@ -105,5 +111,9 @@ int main() {
     }
 
     libusb_exit(nullptr);
+    */
+
+    Perun32 lib;
+
     return 0;
 }
