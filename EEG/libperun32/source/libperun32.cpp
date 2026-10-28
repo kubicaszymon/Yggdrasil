@@ -9,19 +9,32 @@
 
 struct Perun32::pImplPerun32 {
 
-    // VID and PID of perun32 amp
-    static constexpr uint16_t kVID = 0x16d0;
-    static constexpr uint16_t kPID = 0x0fab;
 
-    pImplPerun32();
+    pImplPerun32(uint16_t, uint16_t);
     ~pImplPerun32();
 
-    private:
+    bool connect();
+
+    AmplifierDetails details_{};
+
+private:
+
     libusb_device_handle *device_handle_{nullptr};
-    uint16_t device_model_{0xFFFF};
 };
 
-Perun32::pImplPerun32::pImplPerun32() {
+Perun32::pImplPerun32::pImplPerun32(const uint16_t vid, const uint16_t pid)
+    : details_{.vid_ = vid, .pid_ = pid} {
+}
+
+Perun32::pImplPerun32::~pImplPerun32() {
+    if (nullptr != device_handle_) {
+        libusb_close(device_handle_);
+    }
+    libusb_exit(nullptr);
+}
+
+bool Perun32::pImplPerun32::connect() {
+    bool success{false};
     if (const int init_status = libusb_init_context(nullptr, nullptr, 0);
         LIBUSB_SUCCESS == init_status) {
         libusb_device **device_list{};
@@ -33,9 +46,9 @@ Perun32::pImplPerun32::pImplPerun32() {
             libusb_device_descriptor device_descriptor{};
             for (int i = 0; i < devices_count; i++) {
                 libusb_get_device_descriptor(device_list[i], &device_descriptor);
-                if (kVID == device_descriptor.idVendor && kPID == device_descriptor.idProduct) {
+                if (details_.vid_ == device_descriptor.idVendor && details_.pid_ == device_descriptor.idProduct) {
                     // save the model (A,B,C,D) - important for channel count and electrode map
-                    device_model_ = device_descriptor.bcdDevice;
+                    details_.device_model_ = device_descriptor.bcdDevice;
                     device = device_list[i];
                     break;
                 }
@@ -45,33 +58,48 @@ Perun32::pImplPerun32::pImplPerun32() {
             if (nullptr != device) {
                 if (const int open_status = libusb_open(device, &device_handle_);
                     LIBUSB_SUCCESS == open_status) {
-
+                    libusb_detach_kernel_driver(device_handle_, 0);
+                    if (LIBUSB_SUCCESS == libusb_claim_interface(device_handle_, 0)) {
+                        libusb_set_interface_alt_setting(device_handle_, 0, 0);
+                        success = true;
+                    } else {
+                        // @TODO
+                        success = false;
+                    }
                 } else if (LIBUSB_ERROR_ACCESS == open_status) {
                     // @TODO
-                }
-                else if (LIBUSB_ERROR_NOT_FOUND == open_status) {
+                    success = false;
+                } else if (LIBUSB_ERROR_NOT_FOUND == open_status) {
                     // @TODO
+                    success = false;
                 } else {
                     // @TODO
+                    success = false;
                 }
             }
 
-            libusb_free_device_list(device_list,1);
+            libusb_free_device_list(device_list, 1);
         }
     } else {
         // @TODO handle somehow warnings/errors by for example getlastError functionality of somehow!
+        success = false;
     }
+    return success;
+}
+/*
+ ***************************** INTERFACE *****************************
+*/
+
+Perun32::Perun32(const uint16_t vid, const uint16_t pid)
+    : pImpl(std::make_unique<Perun32::pImplPerun32>(vid, pid)) {
 }
 
-Perun32::pImplPerun32::~pImplPerun32() {
-    if (nullptr != device_handle_) {
-        libusb_close(device_handle_);
-    }
-    libusb_exit(nullptr);
+Perun32::AmplifierDetails Perun32::getAmplifierDetails() const {
+    return pImpl->details_;
 }
 
-Perun32::Perun32()
-    : pImpl(std::make_unique<Perun32::pImplPerun32>()) {
+bool Perun32::connect() const {
+    return pImpl->connect();
 }
 
 /*
@@ -80,4 +108,3 @@ Perun32::Perun32()
 * the destructor in .h file would not determine the overall size of object thus it needs to be done here where the PImpl type is completed.
 */
 Perun32::~Perun32() = default;
-
