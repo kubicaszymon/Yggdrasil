@@ -6,11 +6,12 @@
 #include <libusb-1.0/libusb.h>
 
 #include <iostream>
+#include <thread>
+#include <vector>
 
 struct Perun32::pImplPerun32 {
-
-
     pImplPerun32(uint16_t, uint16_t);
+
     ~pImplPerun32();
 
     bool connect();
@@ -18,7 +19,6 @@ struct Perun32::pImplPerun32 {
     AmplifierDetails details_{};
 
 private:
-
     libusb_device_handle *device_handle_{nullptr};
 };
 
@@ -61,7 +61,30 @@ bool Perun32::pImplPerun32::connect() {
                     libusb_detach_kernel_driver(device_handle_, 0);
                     if (LIBUSB_SUCCESS == libusb_claim_interface(device_handle_, 0)) {
                         libusb_set_interface_alt_setting(device_handle_, 0, 0);
-                        success = true;
+                        std::vector<uint8_t> data(9);
+                        while (1 < libusb_control_transfer(
+                            device_handle_,
+                            0xC0, // bit 7 - device-to-host, bit 6-5 - vendor specific request, bit 4-0 - usb device
+                            0xB0, // perun32's own specific command for report vendor status,
+                            0,
+                            0,
+                            data.data(),
+                            data.size(),
+                            50)) {
+                            if (data.at(0) == 0x10) {
+                                if (data.at(1) == 0xA5) { // VC_ST_READY
+                                    libusb_set_interface_alt_setting(device_handle_, 0, 1);
+                                    success = true;
+                                    break;
+                                }
+                                if (data.at(1) == 0x51) { // VS_ST_STARTUP
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                    continue;
+                                }
+                                success = false;
+                                break;
+                            }
+                        }
                     } else {
                         // @TODO
                         success = false;
@@ -86,6 +109,7 @@ bool Perun32::pImplPerun32::connect() {
     }
     return success;
 }
+
 /*
  ***************************** INTERFACE *****************************
 */
