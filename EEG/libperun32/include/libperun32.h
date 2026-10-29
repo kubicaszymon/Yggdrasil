@@ -7,25 +7,27 @@
 #include <cstdint>
 #include <memory>
 
-class Perun32 {
-    public:
+class Perun32
+{
+public:
     Perun32(uint16_t vid, uint16_t pid);
+
     virtual ~Perun32();
 
-    struct AmplifierDetails {
+    struct AmplifierDetails
+    {
         const uint16_t vid_{};
         const uint16_t pid_{};
         uint16_t device_model_{0xFFFF};
     };
+
     [[nodiscard]] AmplifierDetails getAmplifierDetails() const;
 
     [[nodiscard]] bool connect() const;
 
-
-    private:
+private:
     struct pImplPerun32;
     std::unique_ptr<pImplPerun32> pImpl;
-
 };
 
 #endif // libperun32_API

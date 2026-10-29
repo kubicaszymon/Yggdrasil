@@ -6,8 +6,8 @@ add_library(libperun32 STATIC
 include(FetchContent)
 FetchContent_Declare(
         libusb
-        GIT_REPOSITORY https://github.com/libusb/libusb.git
-        GIT_TAG 6a1aff0b39c724657fd92b2d2bf82eb532344570
+        GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
+        GIT_TAG bea6567b63796ab27c1c33257d230284fb2d8316
 )
 FetchContent_MakeAvailable(libusb)
 
