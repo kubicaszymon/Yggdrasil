@@ -20,29 +20,22 @@ public:
         uint16_t device_model_{0xFFFF};
     };
 
-    enum class CommandId
+    enum class SamplingRate
     {
-        Check,
-        PowerOn,
-        PowerOff,
-        Init,
-        Stop,
-        Start,
-        GetTime,
-        Config500Hz,
-        Config1000Hz,
-        Config2000Hz,
-        Config4000Hz,
-        Config8000Hz,
-        Config16000Hz,
-        ConfigImp500Hz,
-        ConfigImp1000Hz,
-        ConfigImp2000Hz,
-        ConfigImp4000Hz,
-        ConfigImp8000Hz,
-        ConfigImp16000Hz
+        Hz500,
+        Hz1000,
+        Hz2000,
+        Hz4000,
+        Hz8000,
+        Hz16000,
+        Undefined
     };
 
+    struct CommunicationDetails
+    {
+        SamplingRate sampling_rate{SamplingRate::Undefined};
+        bool impedance_mode{false};
+    };
 
     [[nodiscard]] AmplifierDetails getAmplifierDetails() const noexcept;
     [[nodiscard]] bool connect() const noexcept;

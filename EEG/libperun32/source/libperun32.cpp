@@ -16,12 +16,20 @@ struct Perun32::pImplPerun32
     ~pImplPerun32();
 
     bool connect();
+    bool setupDevice(SamplingRate sampling_rate, bool impedance_mode = false);
+
     std::string getLastError();
-    AmplifierDetails details_{};
+    AmplifierDetails amp_details{};
+    CommunicationDetails communication_details{};
 
 private:
     bool initialConfigureDevice();
+    bool resetConfigurations();
     bool evaluateDeviceResponse(const int &response);
+
+    bool powerOnADCs();
+    bool configureSampling(SamplingRate sampling_rate, bool impedance_mode = false);
+    bool syncDeviceClock();
 
     struct CommandData
     {
@@ -31,14 +39,16 @@ private:
     };
 
     static CommandData getCommandDataFromCommandId(const CommandId &command_id);
-    bool sendCommand(const CommandId& command_id);
+    bool sendCommand(const CommandData &command_data);
 
     libusb_device_handle *device_handle_{nullptr};
     std::string last_error_{};
+
+    int64_t host_sync_timestamp_us_{};
 };
 
 Perun32::pImplPerun32::pImplPerun32(const uint16_t vid, const uint16_t pid)
-    : details_{.vid_ = vid, .pid_ = pid} {}
+    : amp_details{.vid_ = vid, .pid_ = pid} {}
 
 Perun32::pImplPerun32::~pImplPerun32()
 {
@@ -66,10 +76,10 @@ bool Perun32::pImplPerun32::connect()
             {
                 // find the correct one
                 libusb_get_device_descriptor(device_list[i], &device_descriptor);
-                if (details_.vid_ == device_descriptor.idVendor && details_.pid_ == device_descriptor.idProduct)
+                if (amp_details.vid_ == device_descriptor.idVendor && amp_details.pid_ == device_descriptor.idProduct)
                 {
                     // save the model (A,B,C,D) - important for channel count and electrode map
-                    details_.device_model_ = device_descriptor.bcdDevice;
+                    amp_details.device_model_ = device_descriptor.bcdDevice;
                     device = device_list[i];
                     break;
                 }
@@ -97,9 +107,25 @@ bool Perun32::pImplPerun32::connect()
     return false;
 }
 
-bool Perun32::pImplPerun32::sendCommand(const CommandId& command_id)
+bool Perun32::pImplPerun32::setupDevice(SamplingRate sampling_rate, const bool impedance_mode)
 {
-    const auto command_data = getCommandDataFromCommandId(command_id);
+    if (false == powerOnADCs())
+    {
+        return false;
+    }
+    if (false == configureSampling(sampling_rate, impedance_mode))
+    {
+        return false;
+    }
+    if (false == syncDeviceClock())
+    {
+        return false;
+    }
+    return true;
+}
+
+bool Perun32::pImplPerun32::sendCommand(const CommandData &command_data)
+{
     int transferred{0};
     // send command to bulk OUT endpoint
     int status = libusb_bulk_transfer(
@@ -155,49 +181,54 @@ bool Perun32::pImplPerun32::initialConfigureDevice()
 {
     // perun32 has only one interface
     libusb_detach_kernel_driver(device_handle_, 0);
-    if (int response = libusb_claim_interface(device_handle_, 0);
-        true == evaluateDeviceResponse(response))
+    if (true == evaluateDeviceResponse(libusb_claim_interface(device_handle_, 0)))
     {
-        // alt0 opens endpoint0
-        libusb_set_interface_alt_setting(device_handle_, 0, 0);
-        std::vector<uint8_t> data(9);
+        return resetConfigurations();
+    }
+    return false;
+}
 
-        // check if device is ready
-        for (int attempt = 0; attempt < VC_ST_SET_MAX_ATTEMPTS; attempt++)
+bool Perun32::pImplPerun32::resetConfigurations()
+{
+    // alt0 opens endpoint0
+    libusb_set_interface_alt_setting(device_handle_, 0, 0);
+    std::vector<uint8_t> data(9);
+
+    // check if device is ready
+    for (int attempt = 0; attempt < VC_ST_SET_MAX_ATTEMPTS; attempt++)
+    {
+        int response = libusb_control_transfer(
+            device_handle_,
+            0xC0, // bit 7 - device-to-host, bit 6-5 - vendor specific request, bit 4-0 - usb device
+            0xB0, // perun32's own specific command for report vendor status,
+            0,
+            0,
+            data.data(),
+            data.size(),
+            50);
+
+        if (true == evaluateDeviceResponse(response) && response == 9)
         {
-            response = libusb_control_transfer(
-                device_handle_,
-                0xC0, // bit 7 - device-to-host, bit 6-5 - vendor specific request, bit 4-0 - usb device
-                0xB0, // perun32's own specific command for report vendor status,
-                0,
-                0,
-                data.data(),
-                data.size(),
-                50);
-
-            if (true == evaluateDeviceResponse(response) && response == 9)
+            if (data.at(0) == VC_ST_VERSION)
             {
-                if (data.at(0) == VC_ST_VERSION)
+                if (data.at(1) == VC_ST_READY) // VC_ST_READY
                 {
-                    if (data.at(1) == VC_ST_READY) // VC_ST_READY
-                    {
-                        // alt1 means bulk endpoints for setting information will be opened
-                        response = libusb_set_interface_alt_setting(device_handle_, 0, 1);
-                        return evaluateDeviceResponse(response);
-                    }
-                    if (data.at(1) == VC_ST_STARTUP) // VS_ST_STARTUP
-                    {
-                        // if chipset is starting then wait and try again
-                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                        continue;
-                    }
+                    // alt1 means bulk endpoints for setting information will be opened
+                    response = libusb_set_interface_alt_setting(device_handle_, 0, 1);
+                    return evaluateDeviceResponse(response);
+                }
+                if (data.at(1) == VC_ST_STARTUP) // VS_ST_STARTUP
+                {
+                    // if chipset is starting then wait and try again
+                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                    continue;
                 }
             }
-            // if USB transfer failed or returned unknown status, wait briefly before retrying
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        last_error_ = "cannot initialize FPGA if perun amplifier (max attemps exceeded)";
+        // if USB transfer failed or returned unknown status, wait briefly before retrying
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    last_error_ = "cannot initialize FPGA if perun amplifier (max attempts exceeded)";
     return false;
 }
 
@@ -237,6 +268,92 @@ bool Perun32::pImplPerun32::evaluateDeviceResponse(const int &response)
             last_error_ = "Unknown response";
     }
     return response >= 0;;
+}
+
+bool Perun32::pImplPerun32::powerOnADCs()
+{
+    for (int attempt = 0; attempt < POWER_ON_ADCS_MAX_ATTEMPTS; attempt++)
+    {
+        // send power on command to activate ADC power rails
+        if (true == sendCommand(getCommandDataFromCommandId(CommandId::PowerOn)))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            // verify stability by check command
+            if (true == sendCommand(getCommandDataFromCommandId(CommandId::Check)))
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                return true;
+            }
+        }
+        // recovery - clear all settings and lets fpga set once again
+        resetConfigurations();
+    }
+    last_error_ = "cannot power on ADC controller";
+    return false;
+}
+
+bool Perun32::pImplPerun32::configureSampling(SamplingRate sampling_rate, bool impedance_mode)
+{
+    // reset adc internal registers
+    if (false == sendCommand(getCommandDataFromCommandId(CommandId::Init)))
+    {
+        return false;
+    }
+
+    // stop any existing adc read loop
+    if (false == sendCommand(getCommandDataFromCommandId(CommandId::Stop)))
+    {
+        return false;
+    }
+
+    // select proper command
+    CommandId config_cmd;
+    switch (sampling_rate)
+    {
+        case SamplingRate::Hz500:
+            config_cmd = impedance_mode ? CommandId::ConfigImp500Hz : CommandId::Config500Hz;
+            break;
+        case SamplingRate::Hz1000:
+            config_cmd = impedance_mode ? CommandId::ConfigImp1000Hz : CommandId::Config1000Hz;
+            break;
+        case SamplingRate::Hz2000:
+            config_cmd = impedance_mode ? CommandId::ConfigImp2000Hz : CommandId::Config2000Hz;
+            break;
+        case SamplingRate::Hz4000:
+            config_cmd = impedance_mode ? CommandId::ConfigImp4000Hz : CommandId::Config4000Hz;
+            break;
+        case SamplingRate::Hz8000:
+            config_cmd = impedance_mode ? CommandId::ConfigImp8000Hz : CommandId::Config8000Hz;
+            break;
+        case SamplingRate::Hz16000:
+            config_cmd = impedance_mode ? CommandId::ConfigImp16000Hz : CommandId::Config16000Hz;
+            break;
+        case SamplingRate::Undefined:
+            break;
+    }
+
+    // send sampling configuration spi block
+    if (false == sendCommand(getCommandDataFromCommandId(config_cmd)))
+    {
+        return false;
+    }
+
+    communication_details.sampling_rate = sampling_rate;
+    communication_details.impedance_mode = impedance_mode;
+    return true;
+}
+
+bool Perun32::pImplPerun32::syncDeviceClock()
+{
+    if (false == sendCommand(getCommandDataFromCommandId(CommandId::GetTime)))
+    {
+        return false;
+    }
+
+    const auto now = std::chrono::high_resolution_clock::now();
+    host_sync_timestamp_us_ = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+
+    return true;
 }
 
 Perun32::pImplPerun32::CommandData Perun32::pImplPerun32::getCommandDataFromCommandId(const CommandId &command_id)
@@ -377,7 +494,7 @@ Perun32::Perun32(const uint16_t vid, const uint16_t pid)
 
 Perun32::AmplifierDetails Perun32::getAmplifierDetails() const noexcept
 {
-    return pImpl->details_;
+    return pImpl->amp_details;
 }
 
 bool Perun32::connect() const noexcept
