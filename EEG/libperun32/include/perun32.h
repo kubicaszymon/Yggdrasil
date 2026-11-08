@@ -7,6 +7,7 @@
 
 #include "libperun32.h"
 #include "commands.h"
+#include "definitions.h"
 #include "libusb.h"
 
 class Perun32::pImplPerun32
@@ -23,15 +24,17 @@ public:
     Perun32::CommunicationDetails communication_details{};
 
 private:
-    bool initialConfigureDevice();
-    bool resetConfigurations();
+    void initialConfigureDevice();
+    bool checkIfAmplifierIsReady();
     bool evaluateDeviceResponse(const int &response);
 
     bool powerOnADCs();
     bool configureSampling(Perun32::SamplingRate sampling_rate, bool impedance_mode = false);
     bool syncDeviceClock();
 
-    bool sendCommand(const Commands::Command *command_data);
+    bool sendCommandByBulk(const Commands::Command *command_data);
+
+    STATE state_{STATE::UNKNOWN};
 
     libusb_device_handle *device_handle_{nullptr};
     std::string last_error_{};
