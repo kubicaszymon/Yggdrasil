@@ -1,4 +1,4 @@
-#include "../libperun32/include/libperun32.h"
+#include "../libperun32/api/libperun32.h"
 
 static constexpr uint16_t kVID = 0x16d0;
 static constexpr uint16_t kPID = 0x0fab;

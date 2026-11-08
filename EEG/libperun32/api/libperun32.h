@@ -6,13 +6,20 @@
 #define libperun32_API
 #include <cstdint>
 #include <memory>
+#include <string>
 
+/*
+ * @brief
+ */
 class Perun32
 {
 public:
     Perun32(uint16_t vid, uint16_t pid);
     virtual ~Perun32();
 
+    /*
+     * @brief
+     */
     struct AmplifierDetails
     {
         const uint16_t vid_{};
@@ -20,6 +27,9 @@ public:
         uint16_t device_model_{0xFFFF};
     };
 
+    /*
+     * @brief
+     */
     enum class SamplingRate
     {
         Hz500,
@@ -31,18 +41,37 @@ public:
         Undefined
     };
 
+    /*
+     * @brief
+     */
     struct CommunicationDetails
     {
         SamplingRate sampling_rate{SamplingRate::Undefined};
         bool impedance_mode{false};
     };
 
+    /*
+     * @brief
+     */
     [[nodiscard]] AmplifierDetails getAmplifierDetails() const noexcept;
-    [[nodiscard]] bool connect() const noexcept;
+
+    /*
+     * @brief
+     */
+    [[nodiscard]] bool connect() const;
+
+    /*
+     * @brief
+     */
     [[nodiscard]] std::string getLastError() const noexcept;
 
+    /*
+     * @brief
+     */
+    [[nodiscard]] bool setSamplingRate(SamplingRate sampling_rate, bool impedance_mode = false) const;
+
 private:
-    struct pImplPerun32;
+    class pImplPerun32;
     std::unique_ptr<pImplPerun32> pImpl;
 };
 

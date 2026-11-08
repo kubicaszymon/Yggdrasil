@@ -18,27 +18,4 @@ constexpr uint8_t VC_ST_VERSION = 0x10; // Expected status header version
 constexpr uint8_t VC_ST_READY   = 0xA5; // FPGA fully booted and ready
 constexpr uint8_t VC_ST_STARTUP = 0x51; // FPGA warming up / initializing
 
-enum class CommandId
-{
-    Check,
-    PowerOn,
-    PowerOff,
-    Init,
-    Stop,
-    Start,
-    GetTime,
-    Config500Hz,
-    Config1000Hz,
-    Config2000Hz,
-    Config4000Hz,
-    Config8000Hz,
-    Config16000Hz,
-    ConfigImp500Hz,
-    ConfigImp1000Hz,
-    ConfigImp2000Hz,
-    ConfigImp4000Hz,
-    ConfigImp8000Hz,
-    ConfigImp16000Hz
-};
-
 #endif // libperun32_DEFINITIONS
