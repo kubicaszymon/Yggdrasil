@@ -18,26 +18,26 @@ enum class ALT_SETTING : std::uint8_t
     EP2_ISO2_IN_EP6_BULK_OUT_EP8_BULK_IN = 4 // 2 microframes on iso
 };
 
+enum class INIT_STEP : std::uint8_t
+{
+    INIT_LIBUSB = 0,
+    OPEN_DEVICE,
+    PREPARE_INTERFACE,
+    WAIT_READY,
+    CHECK_LINK,
+    POWER_ON,
+    INIT_ADC,
+    STOP_ADC,
+    DONE,
+    FAILED = 255
+};
+
 enum class STATE : std::uint8_t
 {
     DISCONNECTED = 0,
-
-
-
-    IDLE = 0,
-    ENUMERATE_DEVICES,
-    OPEN,
-    INITIAL_CONFIG_START,
-    INITIAL_CONFIG_DETACH_KERNEL_DRIVER,
-    INITIAL_CONFIG_CLAIM_INTERFACE,
-    INITIAL_CONFIG_CHECK_ADC_READY,
-    INITIAL_CONFIG_CHECK_DATA,
-    INITIAL_CONFIG_POWER_ADC,
-    INITIAL_CONFIG_INIT_DATA,
-    INITIAL_CONFIG_FINALIZE,
-    FINALIZE,
-    ERROR = 254,
-    UNKNOWN = 255
+    IDLE,
+    RUNNING,
+    FAILED = 255
 };
 
 // Vendor Status Protocol Constants
@@ -57,9 +57,8 @@ namespace AmpStatus
 
 namespace ResponseLength
 {
-    constexpr std::uint8_t BULK = 512; // IN/OUT
-    constexpr std::uint8_t ISOCHRONOUS = 450; // IN
-
+    constexpr std::uint16_t BULK = 512; // IN/OUT
+    constexpr std::uint16_t ISOCHRONOUS = 450; // IN
 }
 
 constexpr std::uint8_t ENDPOINT_2_ADDR = 0x82;

@@ -345,7 +345,7 @@ class PerunAmp32Device:
         self._last_timestamp = 0
         self._adc_power_on()
         self._ctrl_out_in(ctrl_seq.init)
-        self._ctrl_out_in(ctrl_seq.stop)
+            self._ctrl_out_in(ctrl_seq.stop)
         seq_name = 'config_%s%d' % ('imp_' if self.measure_impedance else '', self._sampling_rate)
         self._ctrl_out_in(getattr(ctrl_seq, seq_name))
         self.get_time()

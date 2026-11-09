@@ -28,184 +28,142 @@ bool Perun32::pImplPerun32::connect()
         return false;
     }
 
-
-
-
-
-
-
-
-
-    bool result{false};
-
-    libusb_init_context(nullptr, nullptr, 0);
-    libusb_device **device_list{};
-    libusb_device *device{nullptr};
-
-    state_ = STATE::ENUMERATE_DEVICES;
-    while (STATE::IDLE != state_)
+    auto step{INIT_STEP::INIT_LIBUSB};
+    auto next = [&step](const bool ok, const INIT_STEP on_ok)
     {
-        switch (state_)
-        {
-            case STATE::ENUMERATE_DEVICES:
-                if (const ssize_t devices_count = libusb_get_device_list(nullptr, &device_list);
-                    0 < devices_count)
-                {
-                    libusb_device_descriptor device_descriptor{};
-                    for (int i = 0; i < devices_count; i++)
-                    {
-                        // find the correct one
-                        libusb_get_device_descriptor(device_list[i], &device_descriptor);
-                        if (amp_details.vid_ == device_descriptor.idVendor && amp_details.pid_ == device_descriptor.
-                            idProduct)
-                        {
-                            // save the model (A,B,C,D) - important for channel count and electrode map
-                            amp_details.device_model_ = device_descriptor.bcdDevice;
-                            device = device_list[i];
+        step = ok ? on_ok : INIT_STEP::FAILED;
+    };
 
-                            state_ = STATE::OPEN;
-                            break;
-                        }
-                    }
-                } else
+    while (INIT_STEP::DONE != step && INIT_STEP::FAILED != step)
+    {
+        switch (step)
+        {
+            case INIT_STEP::INIT_LIBUSB:
+                next(evaluateDeviceResponse(libusb_init_context(nullptr, nullptr, 0)), INIT_STEP::OPEN_DEVICE);
+                break;
+
+            case INIT_STEP::OPEN_DEVICE:
+                device_handle_ = libusb_open_device_with_vid_pid(nullptr, amp_details.vid_, amp_details.pid_);
+                if (nullptr == device_handle_)
                 {
-                    state_ = STATE::ERROR;
+                    last_error_ = "amplifier not found or cannot be opened";
+                    step = INIT_STEP::FAILED;
+                    break;
                 }
-                break;
-            case STATE::OPEN:
-                if (true == evaluateDeviceResponse(libusb_open(device, &device_handle_)))
                 {
-                    state_ = STATE::INITIAL_CONFIG_START;
-                } else
-                {
-                    state_ = STATE::ERROR;
+                    // model (A,B,C,D) from bcdDevice
+                    libusb_device_descriptor descriptor{};
+                    libusb_get_device_descriptor(libusb_get_device(device_handle_), &descriptor);
+                    amp_details.device_model_ = descriptor.bcdDevice;
                 }
+                step = INIT_STEP::PREPARE_INTERFACE;
                 break;
-            case STATE::INITIAL_CONFIG_START:
-                initialConfigureDevice();
-                state_ = STATE::FINALIZE;
+
+            case INIT_STEP::PREPARE_INTERFACE:
+                libusb_set_auto_detach_kernel_driver(device_handle_, 1);
+                next(evaluateDeviceResponse(libusb_claim_interface(device_handle_, PERUN_INTERFACE_ID))
+                     && setAltSetting(ALT_SETTING::CONTROL),
+                     INIT_STEP::WAIT_READY);
                 break;
-            case STATE::FINALIZE:
-                libusb_free_device_list(device_list, 1);
-                result = true;
+
+            case INIT_STEP::WAIT_READY:
+                next(setAltSetting(ALT_SETTING::CONTROL) && checkIfAmplifierIsReady(), INIT_STEP::CHECK_LINK);
                 break;
+
+            case INIT_STEP::CHECK_LINK:
+                next(setAltSetting(ALT_SETTING::EP6_BULK_OUT_EP8_BULK_IN) && sendCommandByBulk(&Commands::CheckData),
+                     INIT_STEP::POWER_ON);
+                break;
+
+            case INIT_STEP::POWER_ON:
+                next(powerOnADCs(), INIT_STEP::INIT_ADC);
+                break;
+
+            case INIT_STEP::INIT_ADC:
+                next(sendCommandByBulk(&Commands::InitData), INIT_STEP::STOP_ADC);
+                break;
+
+            case INIT_STEP::STOP_ADC:
+                next(sendCommandByBulk(&Commands::Stop), INIT_STEP::DONE);
+                break;
+
             default:
-                state_ = STATE::UNKNOWN;
-                return false;
+                last_error_ = "invalid connect step";
+                step = INIT_STEP::FAILED;
+                break;
         }
     }
-    return result;
+    if (INIT_STEP::FAILED == step)
+    {
+        disconnect(); // the only cleanup place; keeps last_error_
+        return false;
+    }
+    state_ = STATE::IDLE;
+    return true;
 }
 
-void Perun32::pImplPerun32::initialConfigureDevice()
+void Perun32::pImplPerun32::disconnect()
 {
-    bool adc_powered{false};
-    while (STATE::IDLE != state_)
+    if (nullptr != device_handle_)
     {
-        switch (state_)
-        {
-            case STATE::INITIAL_CONFIG_START:
-                state_ = STATE::INITIAL_CONFIG_DETACH_KERNEL_DRIVER;
-                break;
-            case STATE::INITIAL_CONFIG_DETACH_KERNEL_DRIVER:
-                if (true == evaluateDeviceResponse(libusb_detach_kernel_driver(device_handle_, PERUN_INTERFACE_ID)))
-                {
-                    state_ = STATE::INITIAL_CONFIG_CLAIM_INTERFACE;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_CLAIM_INTERFACE:
-                if (true == evaluateDeviceResponse(libusb_claim_interface(device_handle_, PERUN_INTERFACE_ID)))
-                {
-                    libusb_set_interface_alt_setting(device_handle_, PERUN_INTERFACE_ID,
-                                                     static_cast<int>(ALT_SETTING::CONTROL));
-                    state_ = STATE::INITIAL_CONFIG_CHECK_ADC_READY;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_CHECK_ADC_READY:
-                if (true == checkIfAmplifierIsReady())
-                {
-                    // @TODO maybe just alt 3/4 with iso open? check
-                    libusb_set_interface_alt_setting(device_handle_, PERUN_INTERFACE_ID,
-                                                     static_cast<int>(ALT_SETTING::EP6_BULK_OUT_EP8_BULK_IN));;
-                    state_ = STATE::INITIAL_CONFIG_CHECK_DATA;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_CHECK_DATA:
-                // initial send check data command ------ ???
-                if (true == sendCommandByBulk(&Commands::CheckData))
-                {
-                    if (true == adc_powered)
-                    {
-                        state_ = STATE::INITIAL_CONFIG_INIT_DATA;
-                    } else
-                    {
-                        state_ = STATE::INITIAL_CONFIG_POWER_ADC;
-                    }
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_POWER_ADC:
-                if (true == powerOnADCs())
-                {
-                    adc_powered = true;
-                    state_ = STATE::INITIAL_CONFIG_CHECK_DATA;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_INIT_DATA:
-                if (true == sendCommandByBulk(&Commands::InitData))
-                {
-                    state_ = STATE::INITIAL_CONFIG_FINALIZE;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::INITIAL_CONFIG_FINALIZE:
-                if (true == sendCommandByBulk(&Commands::Stop))
-                {
-                    state_ = STATE::IDLE;
-                } else
-                {
-                    state_ = STATE::ERROR;
-                }
-                break;
-            case STATE::ERROR:
-                //@TODO
-                break;
-            default:
-                state_ = STATE::UNKNOWN;
-        }
+        sendCommandByBulk(&Commands::PowerOff);
+        libusb_release_interface(device_handle_, PERUN_INTERFACE_ID);
+        libusb_close(device_handle_);
+        device_handle_ = nullptr;
     }
+    libusb_exit(nullptr);
+    state_ = STATE::DISCONNECTED;
 }
 
-bool Perun32::pImplPerun32::setSamplingRate(const Perun32::SamplingRate sampling_rate, const bool impedance_mode)
+bool Perun32::pImplPerun32::setSamplingRate(const SamplingRate sampling_rate, const bool impedance_mode)
 {
-    if (false == powerOnADCs())
+    if (STATE::IDLE != state_)
+    {
+        last_error_ = "sampling rate can be set only when idle";
+        return false;
+    }
+
+    // select proper command
+    Commands::Command sampling{};
+    switch (sampling_rate)
+    {
+        case SamplingRate::Hz500:
+            sampling = impedance_mode ? Commands::ConfigImp500 : Commands::Config500;
+            break;
+        case SamplingRate::Hz1000:
+            sampling = impedance_mode ? Commands::ConfigImp1000 : Commands::Config1000;
+            break;
+        case SamplingRate::Hz2000:
+            sampling = impedance_mode ? Commands::ConfigImp2000 : Commands::Config2000;
+            break;
+        case SamplingRate::Hz4000:
+            sampling = impedance_mode ? Commands::ConfigImp4000 : Commands::Config4000;
+            break;
+        case SamplingRate::Hz8000:
+            sampling = impedance_mode ? Commands::ConfigImp8000 : Commands::Config8000;
+            break;
+        case SamplingRate::Hz16000:
+            sampling = impedance_mode ? Commands::ConfigImp16000 : Commands::Config16000;
+            break;
+        case SamplingRate::Undefined:
+            last_error_ = "undefined sampling rate";
+            return false;
+    }
+
+    communication_details.sampling_rate = SamplingRate::Undefined; // invalid until fully configured
+
+//    const bool ok = powerOnADCs() // pwr_on, check (retry + alt toggle)
+//                    && sendCommandByBulk(&Commands::InitData) // reset ADC registers
+//                    && sendCommandByBulk(&Commands::Stop) // leave continuous mode
+//                    && sendCommandByBulk(&sampling);
+
+    if (false == sendCommandByBulk(&sampling))
     {
         return false;
     }
-    if (false == configureSampling(sampling_rate, impedance_mode))
-    {
-        return false;
-    }
-    if (false == syncDeviceClock())
-    {
-        return false;
-    }
+
+    communication_details.sampling_rate = sampling_rate;
+    communication_details.impedance_mode = impedance_mode;
     return true;
 }
 
@@ -251,10 +209,15 @@ bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_d
         {
             mismatches++;
         }
+        if (mismatches > 10)
+        {
+            last_error_ = ">10 mismatches in response";
+            break;
+        }
     }
 
     // MISMATCHES allowed value according to Braintech's driver
-    return mismatches <= 10;
+    return mismatches == 0;
 }
 
 std::string Perun32::pImplPerun32::getLastError()
@@ -313,72 +276,20 @@ bool Perun32::pImplPerun32::powerOnADCs()
 {
     for (int attempt = 0; attempt < POWER_ON_ADCS_MAX_ATTEMPTS; attempt++)
     {
-        // send power on command to activate ADC power rails
-        if (true == sendCommandByBulk(&Commands::PowerOn))
+        if (sendCommandByBulk(&Commands::PowerOn))
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            // verify stability by check command
-            if (true == sendCommandByBulk(&Commands::CheckData))
+            if (sendCommandByBulk(&Commands::CheckData))
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(150));
                 return true;
             }
         }
+        setAltSetting(ALT_SETTING::CONTROL);
+        setAltSetting(ALT_SETTING::EP6_BULK_OUT_EP8_BULK_IN);
     }
     last_error_ = "cannot power on ADC controller";
     return false;
-}
-
-bool Perun32::pImplPerun32::configureSampling(const Perun32::SamplingRate sampling_rate, const bool impedance_mode)
-{
-    // reset adc internal registers
-    if (false == sendCommandByBulk(&Commands::InitData))
-    {
-        return false;
-    }
-
-    // stop any existing adc read loop
-    if (false == sendCommandByBulk(&Commands::Stop))
-    {
-        return false;
-    }
-
-    // select proper command
-    Commands::Command sampling{};
-    switch (sampling_rate)
-    {
-        case SamplingRate::Hz500:
-            sampling = impedance_mode ? Commands::ConfigImp500 : Commands::Config500;
-            break;
-        case SamplingRate::Hz1000:
-            sampling = impedance_mode ? Commands::ConfigImp1000 : Commands::Config1000;
-            break;
-        case SamplingRate::Hz2000:
-            sampling = impedance_mode ? Commands::ConfigImp2000 : Commands::Config2000;
-            break;
-        case SamplingRate::Hz4000:
-            sampling = impedance_mode ? Commands::ConfigImp4000 : Commands::Config4000;
-            break;
-        case SamplingRate::Hz8000:
-            sampling = impedance_mode ? Commands::ConfigImp8000 : Commands::Config8000;
-            break;
-        case SamplingRate::Hz16000:
-            sampling = impedance_mode ? Commands::ConfigImp16000 : Commands::Config16000;
-            break;
-        case SamplingRate::Undefined:
-            last_error_ = "Undefined sampling rate";
-            return false;
-    }
-
-    // send sampling configuration spi block
-    if (false == sendCommandByBulk(&sampling))
-    {
-        return false;
-    }
-
-    communication_details.sampling_rate = sampling_rate;
-    communication_details.impedance_mode = impedance_mode;
-    return true;
 }
 
 bool Perun32::pImplPerun32::syncDeviceClock()
@@ -392,4 +303,15 @@ bool Perun32::pImplPerun32::syncDeviceClock()
     host_sync_timestamp_us_ = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 
     return true;
+}
+
+bool Perun32::pImplPerun32::setAltSetting(const ALT_SETTING alt)
+{
+    if (true == evaluateDeviceResponse(
+            libusb_set_interface_alt_setting(device_handle_, PERUN_INTERFACE_ID, static_cast<uint8_t>(alt))))
+    {
+        current_alt_setting_ = alt;
+        return true;
+    }
+    return false;
 }

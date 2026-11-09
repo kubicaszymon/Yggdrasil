@@ -61,6 +61,11 @@ public:
     [[nodiscard]] bool connect() const;
 
     /*
+    * @brief
+    */
+    void disconnect() const;
+
+    /*
      * @brief
      */
     [[nodiscard]] std::string getLastError() const noexcept;

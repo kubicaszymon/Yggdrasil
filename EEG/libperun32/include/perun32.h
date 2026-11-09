@@ -17,6 +17,8 @@ public:
     ~pImplPerun32();
 
     bool connect();
+    void disconnect();
+
     bool setSamplingRate(Perun32::SamplingRate sampling_rate, bool impedance_mode = false);
 
     std::string getLastError();
@@ -24,17 +26,17 @@ public:
     Perun32::CommunicationDetails communication_details{};
 
 private:
-    void initialConfigureDevice();
     bool checkIfAmplifierIsReady();
     bool evaluateDeviceResponse(const int &response);
 
     bool powerOnADCs();
-    bool configureSampling(Perun32::SamplingRate sampling_rate, bool impedance_mode = false);
     bool syncDeviceClock();
 
+    bool setAltSetting(ALT_SETTING alt);
     bool sendCommandByBulk(const Commands::Command *command_data);
 
-    STATE state_{STATE::UNKNOWN};
+    STATE state_{STATE::DISCONNECTED};
+    ALT_SETTING current_alt_setting_{ALT_SETTING::CONTROL};
 
     libusb_device_handle *device_handle_{nullptr};
     std::string last_error_{};

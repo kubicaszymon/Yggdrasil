@@ -6,10 +6,17 @@ static constexpr uint16_t kPID = 0x0fab;
 int main()
 {
     Perun32 lib(kVID, kPID);
-    if (true == lib.connect())
+
+    //for (int i = 0; i < 20; i++)
     {
-        int a = 3;
+        if (true == lib.connect())
+        {
+            auto result = lib.setSamplingRate(Perun32::SamplingRate::Hz500);
+        }
+
+        lib.disconnect();
     }
+
 
     return 0;
 }
