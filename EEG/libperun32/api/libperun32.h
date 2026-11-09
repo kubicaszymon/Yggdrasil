@@ -4,9 +4,11 @@
 
 #ifndef libperun32_API
 #define libperun32_API
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 /*
  * @brief
@@ -74,6 +76,21 @@ public:
      * @brief
      */
     [[nodiscard]] bool setSamplingRate(SamplingRate sampling_rate, bool impedance_mode = false) const;
+
+    /*
+     * @brief
+    */
+    [[nodiscard]] bool startAcquisition() const;
+
+    /*
+    * @brief
+    */
+    [[nodiscard]] bool stopAcquisition() const;
+
+    /*
+    * @brief
+    */
+    bool readRaw(std::vector<uint8_t> &out, std::chrono::milliseconds timeout) const;
 
 private:
     class pImplPerun32;

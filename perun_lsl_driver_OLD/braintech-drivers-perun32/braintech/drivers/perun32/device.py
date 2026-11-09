@@ -348,7 +348,11 @@ class PerunAmp32Device:
             self._ctrl_out_in(ctrl_seq.stop)
         seq_name = 'config_%s%d' % ('imp_' if self.measure_impedance else '', self._sampling_rate)
         self._ctrl_out_in(getattr(ctrl_seq, seq_name))
+
+
         self.get_time()
+
+    
         self._ctrl_out_in(ctrl_seq.start)
         self._set_alt(USB_ALT.ISO_1 if self._sampling_rate == 16000 else USB_ALT.ISO_2)
         self._transfers = self._schedule_transfers()

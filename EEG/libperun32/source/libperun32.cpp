@@ -35,6 +35,21 @@ bool Perun32::setSamplingRate(const SamplingRate sampling_rate, const bool imped
     return pImpl->setSamplingRate(sampling_rate, impedance_mode);
 }
 
+bool Perun32::startAcquisition() const
+{
+    return pImpl->start();
+}
+
+bool Perun32::stopAcquisition() const
+{
+    return pImpl->stop();
+}
+
+bool Perun32::readRaw(std::vector<uint8_t> &out, const std::chrono::milliseconds timeout) const
+{
+    return pImpl->readRaw(out, timeout);
+}
+
 /*
 * why here? because if I would not put it there, the compiler would generate default destructor in the class declaration (.h file),
 * and such destructor will try to delete pImpl unique_ptr and because I made it as incomplete struct declaration (PImpl),

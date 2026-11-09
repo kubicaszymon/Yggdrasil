@@ -22,32 +22,32 @@ Perun32::pImplPerun32::~pImplPerun32()
 
 bool Perun32::pImplPerun32::connect()
 {
-    if (STATE::DISCONNECTED != state_)
+    if (State::DISCONNECTED != state_)
     {
         last_error_ = "already connected";
         return false;
     }
 
-    auto step{INIT_STEP::INIT_LIBUSB};
-    auto next = [&step](const bool ok, const INIT_STEP on_ok)
+    auto step{InitStep::INIT_LIBUSB};
+    auto next = [&step](const bool ok, const InitStep on_ok)
     {
-        step = ok ? on_ok : INIT_STEP::FAILED;
+        step = ok ? on_ok : InitStep::FAILED;
     };
 
-    while (INIT_STEP::DONE != step && INIT_STEP::FAILED != step)
+    while (InitStep::DONE != step && InitStep::FAILED != step)
     {
         switch (step)
         {
-            case INIT_STEP::INIT_LIBUSB:
-                next(evaluateDeviceResponse(libusb_init_context(nullptr, nullptr, 0)), INIT_STEP::OPEN_DEVICE);
+            case InitStep::INIT_LIBUSB:
+                next(evaluateDeviceResponse(libusb_init_context(nullptr, nullptr, 0)), InitStep::OPEN_DEVICE);
                 break;
 
-            case INIT_STEP::OPEN_DEVICE:
+            case InitStep::OPEN_DEVICE:
                 device_handle_ = libusb_open_device_with_vid_pid(nullptr, amp_details.vid_, amp_details.pid_);
                 if (nullptr == device_handle_)
                 {
                     last_error_ = "amplifier not found or cannot be opened";
-                    step = INIT_STEP::FAILED;
+                    step = InitStep::FAILED;
                     break;
                 }
                 {
@@ -56,49 +56,49 @@ bool Perun32::pImplPerun32::connect()
                     libusb_get_device_descriptor(libusb_get_device(device_handle_), &descriptor);
                     amp_details.device_model_ = descriptor.bcdDevice;
                 }
-                step = INIT_STEP::PREPARE_INTERFACE;
+                step = InitStep::PREPARE_INTERFACE;
                 break;
 
-            case INIT_STEP::PREPARE_INTERFACE:
+            case InitStep::PREPARE_INTERFACE:
                 libusb_set_auto_detach_kernel_driver(device_handle_, 1);
                 next(evaluateDeviceResponse(libusb_claim_interface(device_handle_, PERUN_INTERFACE_ID))
-                     && setAltSetting(ALT_SETTING::CONTROL),
-                     INIT_STEP::WAIT_READY);
+                     && setAltSetting(AltSetting::CONTROL),
+                     InitStep::WAIT_READY);
                 break;
 
-            case INIT_STEP::WAIT_READY:
-                next(setAltSetting(ALT_SETTING::CONTROL) && checkIfAmplifierIsReady(), INIT_STEP::CHECK_LINK);
+            case InitStep::WAIT_READY:
+                next(setAltSetting(AltSetting::CONTROL) && checkIfAmplifierIsReady(), InitStep::CHECK_LINK);
                 break;
 
-            case INIT_STEP::CHECK_LINK:
-                next(setAltSetting(ALT_SETTING::EP6_BULK_OUT_EP8_BULK_IN) && sendCommandByBulk(&Commands::CheckData),
-                     INIT_STEP::POWER_ON);
+            case InitStep::CHECK_LINK:
+                next(setAltSetting(AltSetting::EP6_BULK_OUT_EP8_BULK_IN) && sendCommandByBulk(&Commands::CheckData),
+                     InitStep::POWER_ON);
                 break;
 
-            case INIT_STEP::POWER_ON:
-                next(powerOnADCs(), INIT_STEP::INIT_ADC);
+            case InitStep::POWER_ON:
+                next(powerOnADCs(), InitStep::INIT_ADC);
                 break;
 
-            case INIT_STEP::INIT_ADC:
-                next(sendCommandByBulk(&Commands::InitData), INIT_STEP::STOP_ADC);
+            case InitStep::INIT_ADC:
+                next(sendCommandByBulk(&Commands::InitData), InitStep::STOP_ADC);
                 break;
 
-            case INIT_STEP::STOP_ADC:
-                next(sendCommandByBulk(&Commands::Stop), INIT_STEP::DONE);
+            case InitStep::STOP_ADC:
+                next(sendCommandByBulk(&Commands::Stop), InitStep::DONE);
                 break;
 
             default:
                 last_error_ = "invalid connect step";
-                step = INIT_STEP::FAILED;
+                step = InitStep::FAILED;
                 break;
         }
     }
-    if (INIT_STEP::FAILED == step)
+    if (InitStep::FAILED == step)
     {
         disconnect(); // the only cleanup place; keeps last_error_
         return false;
     }
-    state_ = STATE::IDLE;
+    state_ = State::IDLE;
     return true;
 }
 
@@ -112,12 +112,87 @@ void Perun32::pImplPerun32::disconnect()
         device_handle_ = nullptr;
     }
     libusb_exit(nullptr);
-    state_ = STATE::DISCONNECTED;
+    state_ = State::DISCONNECTED;
+}
+
+bool Perun32::pImplPerun32::readRaw(std::vector<uint8_t> &out, std::chrono::milliseconds timeout)
+{
+    std::unique_lock lock(queue_mutex_);
+    if (false == queue_cv_.wait_for(lock, timeout, [this]
+    {
+        return false == queue_.empty();
+    }))
+    {
+        return false;
+    }
+    out = std::move(queue_.front());
+    queue_.pop_front();
+    return true;
+}
+
+bool Perun32::pImplPerun32::start()
+{
+    // Idle state of course required
+    if (State::IDLE != state_)
+    {
+        last_error_ = "state not idle";
+        return false;
+    }
+
+    // Sampling rate needs to be set before
+    if (SamplingRate::Undefined == communication_details.sampling_rate)
+    {
+        last_error_ = "undefined sampling rate";
+        return false;
+    }
+
+    // Start acquisition
+    if (false == sendCommandByBulk(&Commands::Start))
+    {
+        return false;
+    }
+
+    // For 16khz we need to change for iso endpoint with 2 microframes
+    const auto iso_alt_setting = SamplingRate::Hz16000 == communication_details.sampling_rate ? AltSetting::EP2_ISO2_IN_EP6_BULK_OUT_EP8_BULK_IN : AltSetting::EP2_ISO1_IN_EP6_BULK_OUT_EP8_BULK_IN;
+    auto ok = setAltSetting(iso_alt_setting);
+
+    if (true == ok)
+    {
+        // Reset all states and vars before
+        bytes_received_ = 0;
+        dropped_chunks_ = 0;
+        iso_packet_errors_ = 0;
+        streaming_ = true;
+        ok = submitTransfers();
+    }
+
+    if (false == ok)
+    {
+        abortStreaming();
+        return false;
+    }
+
+    event_thread_ = std::thread(&pImplPerun32::eventLoop, this);
+    state_ = State::RUNNING;
+    return true;
+}
+
+bool Perun32::pImplPerun32::stop()
+{
+    if (State::RUNNING != state_)
+    {
+        last_error_ = "state not running";
+        return false;
+    }
+
+    abortStreaming();
+    state_ = State::IDLE;
+    return true;
 }
 
 bool Perun32::pImplPerun32::setSamplingRate(const SamplingRate sampling_rate, const bool impedance_mode)
 {
-    if (STATE::IDLE != state_)
+    if (State::IDLE != state_)
     {
         last_error_ = "sampling rate can be set only when idle";
         return false;
@@ -220,6 +295,119 @@ bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_d
     return mismatches == 0;
 }
 
+bool Perun32::pImplPerun32::submitTransfers()
+{
+    transfer_buffers_.assign(ISO_TRANSFERS, std::vector<std::uint8_t>(ISO_PACKETS * ISO_PACKET_LEN));
+    for (int i = 0; i < ISO_TRANSFERS; i++)
+    {
+        libusb_transfer* transfer = libusb_alloc_transfer(ISO_PACKETS);
+        if (nullptr == transfer)
+        {
+            last_error_ = "libusb_alloc_transfer failed";
+            return false;
+        }
+        transfers_.push_back(transfer); // owned from now
+
+        libusb_fill_iso_transfer(transfer, device_handle_, ENDPOINT_2_ADDR, transfer_buffers_[i].data(), static_cast<int>(transfer_buffers_[i].size()), ISO_PACKETS,
+            &pImplPerun32::onIsoTransfer, this, ISO_TIMEOUT);
+        libusb_set_iso_packet_lengths(transfer, ISO_PACKET_LEN);
+
+        if (false == evaluateDeviceResponse(libusb_submit_transfer(transfer)))
+        {
+            return false;
+        }
+        ++transfers_in_flight_;
+    }
+    return true;
+}
+
+void Perun32::pImplPerun32::abortStreaming()
+{
+    streaming_ = false;
+    for (auto* transfer : transfers_)
+    {
+        libusb_cancel_transfer(transfer);
+    }
+
+    if (event_thread_.joinable())
+    {
+        event_thread_.join();
+    }
+    else
+    {
+        eventLoop();
+    }
+
+    for (auto *transfer : transfers_)
+    {
+        libusb_free_transfer(transfer);
+    }
+    transfers_.clear();
+    transfer_buffers_.clear();
+
+    // back to bulk settings
+    setAltSetting(AltSetting::EP6_BULK_OUT_EP8_BULK_IN);
+    sendCommandByBulk(&Commands::Stop);
+}
+
+void Perun32::pImplPerun32::eventLoop()
+{
+    timeval tv{0, 100'000};
+    while (transfers_in_flight_ > 0)
+    {
+        libusb_handle_events_timeout_completed(nullptr, &tv, nullptr);
+    }
+}
+
+void LIBUSB_CALL Perun32::pImplPerun32::onIsoTransfer(libusb_transfer *transfer)
+{
+    static_cast<pImplPerun32*>(transfer->user_data)->handleIsoTransfer(transfer);
+}
+
+void Perun32::pImplPerun32::handleIsoTransfer(libusb_transfer *transfer)
+{
+    if (LIBUSB_TRANSFER_COMPLETED == transfer->status)
+    {
+        std::vector<std::uint8_t> chunk;
+        chunk.reserve(transfer->actual_length);
+        for (int i = 0; i < transfer->num_iso_packets; i++)
+        {
+            const auto& pkt = transfer->iso_packet_desc[i];
+            if (LIBUSB_TRANSFER_COMPLETED != pkt.status)
+            {
+                ++iso_packet_errors_;
+                continue;
+            }
+            if (0 == pkt.actual_length)
+            {
+                continue;
+            }
+            const std::uint8_t* src = libusb_get_iso_packet_buffer_simple(transfer, i);
+            chunk.insert(chunk.end(), src, src + pkt.actual_length);
+        }
+        if (false == chunk.empty())
+        {
+            bytes_received_ += chunk.size();
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                if (queue_.size() >= MAX_QUEUED_CHUNKS)
+                {
+                    queue_.pop_front();
+                    ++dropped_chunks_;
+                }
+                queue_.push_back(std::move(chunk));
+            }
+            queue_cv_.notify_one();
+        }
+    }
+    const bool dead = LIBUSB_TRANSFER_CANCELLED == transfer->status || LIBUSB_TRANSFER_NO_DEVICE == transfer->status;
+    if (streaming_ && false == dead && 0 == libusb_submit_transfer(transfer))
+    {
+        return;
+    }
+    --transfers_in_flight_;
+}
+
 std::string Perun32::pImplPerun32::getLastError()
 {
     return last_error_;
@@ -285,8 +473,8 @@ bool Perun32::pImplPerun32::powerOnADCs()
                 return true;
             }
         }
-        setAltSetting(ALT_SETTING::CONTROL);
-        setAltSetting(ALT_SETTING::EP6_BULK_OUT_EP8_BULK_IN);
+        setAltSetting(AltSetting::CONTROL);
+        setAltSetting(AltSetting::EP6_BULK_OUT_EP8_BULK_IN);
     }
     last_error_ = "cannot power on ADC controller";
     return false;
@@ -305,7 +493,7 @@ bool Perun32::pImplPerun32::syncDeviceClock()
     return true;
 }
 
-bool Perun32::pImplPerun32::setAltSetting(const ALT_SETTING alt)
+bool Perun32::pImplPerun32::setAltSetting(const AltSetting alt)
 {
     if (true == evaluateDeviceResponse(
             libusb_set_interface_alt_setting(device_handle_, PERUN_INTERFACE_ID, static_cast<uint8_t>(alt))))

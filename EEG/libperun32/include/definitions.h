@@ -9,7 +9,7 @@
 
 constexpr std::uint8_t DEFAULT_TIMEOUT = 50;
 
-enum class ALT_SETTING : std::uint8_t
+enum class AltSetting : std::uint8_t
 {
     CONTROL = 0,
     EP6_BULK_OUT_EP8_BULK_IN = 1,
@@ -18,7 +18,7 @@ enum class ALT_SETTING : std::uint8_t
     EP2_ISO2_IN_EP6_BULK_OUT_EP8_BULK_IN = 4 // 2 microframes on iso
 };
 
-enum class INIT_STEP : std::uint8_t
+enum class InitStep : std::uint8_t
 {
     INIT_LIBUSB = 0,
     OPEN_DEVICE,
@@ -32,7 +32,7 @@ enum class INIT_STEP : std::uint8_t
     FAILED = 255
 };
 
-enum class STATE : std::uint8_t
+enum class State : std::uint8_t
 {
     DISCONNECTED = 0,
     IDLE,
