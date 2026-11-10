@@ -3,8 +3,10 @@ add_library(libperun32 STATIC
         source/libperun32.cpp
         include/definitions.h
         include/commands.h
-        include/perun32.cpp
+        source/perun32.cpp
         include/perun32.h
+        source/IsoStream.cpp
+        include/IsoStream.h
 )
 
 include(FetchContent)

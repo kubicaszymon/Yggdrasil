@@ -2,10 +2,9 @@
 // Created by Szymon on 06/11/2026.
 //Perun32::
 
-#include "perun32.h"
+#include "../include/perun32.h"
 
 #include <chrono>
-#include <filesystem>
 #include <thread>
 
 Perun32::pImplPerun32::pImplPerun32(const uint16_t vid, const uint16_t pid)
@@ -13,11 +12,7 @@ Perun32::pImplPerun32::pImplPerun32(const uint16_t vid, const uint16_t pid)
 
 Perun32::pImplPerun32::~pImplPerun32()
 {
-    if (nullptr != device_handle_)
-    {
-        libusb_close(device_handle_);
-    }
-    libusb_exit(nullptr);
+    disconnect();
 }
 
 bool Perun32::pImplPerun32::connect()
@@ -104,6 +99,10 @@ bool Perun32::pImplPerun32::connect()
 
 void Perun32::pImplPerun32::disconnect()
 {
+    if (State::RUNNING == state_)
+    {
+        stop();
+    }
     if (nullptr != device_handle_)
     {
         sendCommandByBulk(&Commands::PowerOff);
@@ -115,19 +114,10 @@ void Perun32::pImplPerun32::disconnect()
     state_ = State::DISCONNECTED;
 }
 
-bool Perun32::pImplPerun32::readRaw(std::vector<uint8_t> &out, std::chrono::milliseconds timeout)
+bool Perun32::pImplPerun32::readDataFromQueue(std::vector<uint8_t> &out, const std::chrono::milliseconds timeout)
 {
-    std::unique_lock lock(queue_mutex_);
-    if (false == queue_cv_.wait_for(lock, timeout, [this]
-    {
-        return false == queue_.empty();
-    }))
-    {
-        return false;
-    }
-    out = std::move(queue_.front());
-    queue_.pop_front();
-    return true;
+    // @TODO parsing data
+    return stream_.read(out, timeout);
 }
 
 bool Perun32::pImplPerun32::start()
@@ -152,18 +142,16 @@ bool Perun32::pImplPerun32::start()
         return false;
     }
 
-    // For 16khz we need to change for iso endpoint with 2 microframes
-    const auto iso_alt_setting = SamplingRate::Hz16000 == communication_details.sampling_rate ? AltSetting::EP2_ISO2_IN_EP6_BULK_OUT_EP8_BULK_IN : AltSetting::EP2_ISO1_IN_EP6_BULK_OUT_EP8_BULK_IN;
+    // For 16khz we need to change for iso endpoint for better bandwidth
+    const auto iso_alt_setting = SamplingRate::Hz16000 == communication_details.sampling_rate
+                                     ? AltSetting::EP2_ISO1_IN_EP6_BULK_OUT_EP8_BULK_IN
+                                     : AltSetting::EP2_ISO2_IN_EP6_BULK_OUT_EP8_BULK_IN;
     auto ok = setAltSetting(iso_alt_setting);
 
     if (true == ok)
     {
-        // Reset all states and vars before
-        bytes_received_ = 0;
-        dropped_chunks_ = 0;
-        iso_packet_errors_ = 0;
-        streaming_ = true;
-        ok = submitTransfers();
+        stream_.reset();
+        ok = stream_.prepareAndSubmitTransfers(device_handle_);
     }
 
     if (false == ok)
@@ -172,7 +160,8 @@ bool Perun32::pImplPerun32::start()
         return false;
     }
 
-    event_thread_ = std::thread(&pImplPerun32::eventLoop, this);
+    // start acquiring data to stream queue
+    stream_.start();
     state_ = State::RUNNING;
     return true;
 }
@@ -227,10 +216,10 @@ bool Perun32::pImplPerun32::setSamplingRate(const SamplingRate sampling_rate, co
 
     communication_details.sampling_rate = SamplingRate::Undefined; // invalid until fully configured
 
-//    const bool ok = powerOnADCs() // pwr_on, check (retry + alt toggle)
-//                    && sendCommandByBulk(&Commands::InitData) // reset ADC registers
-//                    && sendCommandByBulk(&Commands::Stop) // leave continuous mode
-//                    && sendCommandByBulk(&sampling);
+    //    const bool ok = powerOnADCs() // pwr_on, check (retry + alt toggle)
+    //                    && sendCommandByBulk(&Commands::InitData) // reset ADC registers
+    //                    && sendCommandByBulk(&Commands::Stop) // leave continuous mode
+    //                    && sendCommandByBulk(&sampling);
 
     if (false == sendCommandByBulk(&sampling))
     {
@@ -295,117 +284,13 @@ bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_d
     return mismatches == 0;
 }
 
-bool Perun32::pImplPerun32::submitTransfers()
+bool Perun32::pImplPerun32::abortStreaming()
 {
-    transfer_buffers_.assign(ISO_TRANSFERS, std::vector<std::uint8_t>(ISO_PACKETS * ISO_PACKET_LEN));
-    for (int i = 0; i < ISO_TRANSFERS; i++)
-    {
-        libusb_transfer* transfer = libusb_alloc_transfer(ISO_PACKETS);
-        if (nullptr == transfer)
-        {
-            last_error_ = "libusb_alloc_transfer failed";
-            return false;
-        }
-        transfers_.push_back(transfer); // owned from now
-
-        libusb_fill_iso_transfer(transfer, device_handle_, ENDPOINT_2_ADDR, transfer_buffers_[i].data(), static_cast<int>(transfer_buffers_[i].size()), ISO_PACKETS,
-            &pImplPerun32::onIsoTransfer, this, ISO_TIMEOUT);
-        libusb_set_iso_packet_lengths(transfer, ISO_PACKET_LEN);
-
-        if (false == evaluateDeviceResponse(libusb_submit_transfer(transfer)))
-        {
-            return false;
-        }
-        ++transfers_in_flight_;
-    }
-    return true;
-}
-
-void Perun32::pImplPerun32::abortStreaming()
-{
-    streaming_ = false;
-    for (auto* transfer : transfers_)
-    {
-        libusb_cancel_transfer(transfer);
-    }
-
-    if (event_thread_.joinable())
-    {
-        event_thread_.join();
-    }
-    else
-    {
-        eventLoop();
-    }
-
-    for (auto *transfer : transfers_)
-    {
-        libusb_free_transfer(transfer);
-    }
-    transfers_.clear();
-    transfer_buffers_.clear();
+    stream_.stop();
 
     // back to bulk settings
     setAltSetting(AltSetting::EP6_BULK_OUT_EP8_BULK_IN);
-    sendCommandByBulk(&Commands::Stop);
-}
-
-void Perun32::pImplPerun32::eventLoop()
-{
-    timeval tv{0, 100'000};
-    while (transfers_in_flight_ > 0)
-    {
-        libusb_handle_events_timeout_completed(nullptr, &tv, nullptr);
-    }
-}
-
-void LIBUSB_CALL Perun32::pImplPerun32::onIsoTransfer(libusb_transfer *transfer)
-{
-    static_cast<pImplPerun32*>(transfer->user_data)->handleIsoTransfer(transfer);
-}
-
-void Perun32::pImplPerun32::handleIsoTransfer(libusb_transfer *transfer)
-{
-    if (LIBUSB_TRANSFER_COMPLETED == transfer->status)
-    {
-        std::vector<std::uint8_t> chunk;
-        chunk.reserve(transfer->actual_length);
-        for (int i = 0; i < transfer->num_iso_packets; i++)
-        {
-            const auto& pkt = transfer->iso_packet_desc[i];
-            if (LIBUSB_TRANSFER_COMPLETED != pkt.status)
-            {
-                ++iso_packet_errors_;
-                continue;
-            }
-            if (0 == pkt.actual_length)
-            {
-                continue;
-            }
-            const std::uint8_t* src = libusb_get_iso_packet_buffer_simple(transfer, i);
-            chunk.insert(chunk.end(), src, src + pkt.actual_length);
-        }
-        if (false == chunk.empty())
-        {
-            bytes_received_ += chunk.size();
-            {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
-                if (queue_.size() >= MAX_QUEUED_CHUNKS)
-                {
-                    queue_.pop_front();
-                    ++dropped_chunks_;
-                }
-                queue_.push_back(std::move(chunk));
-            }
-            queue_cv_.notify_one();
-        }
-    }
-    const bool dead = LIBUSB_TRANSFER_CANCELLED == transfer->status || LIBUSB_TRANSFER_NO_DEVICE == transfer->status;
-    if (streaming_ && false == dead && 0 == libusb_submit_transfer(transfer))
-    {
-        return;
-    }
-    --transfers_in_flight_;
+    return sendCommandByBulk(&Commands::Stop);
 }
 
 std::string Perun32::pImplPerun32::getLastError()

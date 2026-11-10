@@ -47,7 +47,7 @@ bool Perun32::stopAcquisition() const
 
 bool Perun32::readRaw(std::vector<uint8_t> &out, const std::chrono::milliseconds timeout) const
 {
-    return pImpl->readRaw(out, timeout);
+    return pImpl->readDataFromQueue(out, timeout);
 }
 
 /*
