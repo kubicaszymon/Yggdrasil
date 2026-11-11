@@ -10,6 +10,7 @@
 #include "definitions.h"
 #include "libusb.h"
 #include "IsoStream.h"
+#include "EegParser.h"
 
 #include <condition_variable>
 
@@ -22,7 +23,7 @@ public:
     bool connect();
     void disconnect();
 
-    bool readDataFromQueue(std::vector<uint8_t> &out, std::chrono::milliseconds timeout);
+    bool readSamples(std::vector<Sample> &out, std::chrono::milliseconds timeout);
 
     bool start();
     bool stop();
@@ -45,9 +46,6 @@ private:
 
     bool abortStreaming();
 
-
-
-
     State state_{State::DISCONNECTED};
     AltSetting current_alt_setting_{AltSetting::CONTROL};
 
@@ -57,6 +55,7 @@ private:
     int64_t host_sync_timestamp_us_{};
 
     IsoStream stream_{};
+    EegParser parser_{};
 };
 
 

@@ -4,7 +4,6 @@
 
 #include "../include/IsoStream.h"
 #include "definitions.h"
-#include <iostream>
 
 void IsoStream::start()
 {
@@ -95,8 +94,6 @@ void IsoStream::onIsoTransfer(libusb_transfer *transfer)
 
 void IsoStream::handleIsoTransfer(libusb_transfer *transfer)
 {
-    std::cerr << "cb status=" << transfer->status
-              << " len=" << transfer->actual_length << '\n';
     if (LIBUSB_TRANSFER_COMPLETED == transfer->status)
     {
         std::vector<std::uint8_t> chunk;
@@ -132,20 +129,11 @@ void IsoStream::handleIsoTransfer(libusb_transfer *transfer)
         }
     }
 
-    // if we still streaming, resubmit the same transfer to get continuous flow of data
-    //if (const bool dead = LIBUSB_TRANSFER_CANCELLED == transfer->status || LIBUSB_TRANSFER_NO_DEVICE == transfer->status
-     //   ; streaming_ && false == dead && 0 == libusb_submit_transfer(transfer))
-    //{
-     //   return;
-   // }
-    //--transfers_in_flight_;
-    const bool dead = LIBUSB_TRANSFER_CANCELLED == transfer->status
-               || LIBUSB_TRANSFER_NO_DEVICE == transfer->status;
-    if (streaming_ && false == dead)
+    // if we're still streaming, resubmit the same transfer to get continuous flow of data
+    if (const bool dead = LIBUSB_TRANSFER_CANCELLED == transfer->status || LIBUSB_TRANSFER_NO_DEVICE == transfer->status
+       ; streaming_ && false == dead && 0 == libusb_submit_transfer(transfer))
     {
-        const int rc = libusb_submit_transfer(transfer);
-        if (0 == rc) { return; }
-        std::cerr << "resubmit failed: " << libusb_error_name(rc) << '\n';
+       return;
     }
     --transfers_in_flight_;
 }

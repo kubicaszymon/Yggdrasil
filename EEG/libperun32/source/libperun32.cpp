@@ -5,7 +5,6 @@
 #include "../api/libperun32.h"
 #include "perun32.h"
 #include "commands.h"
-#include <thread>
 
 Perun32::Perun32(const uint16_t vid, const uint16_t pid)
     : pImpl(std::make_unique<pImplPerun32>(vid, pid)) {}
@@ -45,9 +44,9 @@ bool Perun32::stopAcquisition() const
     return pImpl->stop();
 }
 
-bool Perun32::readRaw(std::vector<uint8_t> &out, const std::chrono::milliseconds timeout) const
+bool Perun32::readSamples(std::vector<Sample> &out, const std::chrono::milliseconds timeout) const
 {
-    return pImpl->readDataFromQueue(out, timeout);
+    return pImpl->readSamples(out, timeout);
 }
 
 /*

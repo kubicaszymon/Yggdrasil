@@ -15,7 +15,6 @@
 #include "definitions.h"
 #include "libusb.h"
 
-
 class IsoStream
 {
 public:
@@ -40,13 +39,12 @@ private:
 
     IsoCommunication::Details details_{};
 
-    std::atomic<bool> streaming_{false};
-
-    std::thread event_thread_{};
-
     std::atomic<int> transfers_in_flight_{0};
     std::vector<libusb_transfer *> transfers_{};
     std::vector<std::vector<std::uint8_t> > transfer_buffers_{};
+
+    std::atomic<bool> streaming_{false};
+    std::thread event_thread_{};
 
     std::mutex queue_mutex_{};
     std::condition_variable queue_cv_{};

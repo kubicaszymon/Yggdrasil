@@ -114,10 +114,17 @@ void Perun32::pImplPerun32::disconnect()
     state_ = State::DISCONNECTED;
 }
 
-bool Perun32::pImplPerun32::readDataFromQueue(std::vector<uint8_t> &out, const std::chrono::milliseconds timeout)
+// Should we parse data when user wants it or automatically after acquisition?
+bool Perun32::pImplPerun32::readSamples(std::vector<Sample> &out, const std::chrono::milliseconds timeout)
 {
-    // @TODO parsing data
-    return stream_.read(out, timeout);
+    out.clear();
+    std::vector<std::uint8_t> chunk;
+    if (false == stream_.read(chunk, timeout))
+    {
+        return false;
+    }
+    parser_.push(chunk, out);
+    return true;
 }
 
 bool Perun32::pImplPerun32::start()

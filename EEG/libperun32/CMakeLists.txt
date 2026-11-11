@@ -7,6 +7,8 @@ add_library(libperun32 STATIC
         include/perun32.h
         source/IsoStream.cpp
         include/IsoStream.h
+        source/EegParser.cpp
+        include/EegParser.h
 )
 
 include(FetchContent)
