@@ -55,3 +55,8 @@ bool Perun32::readSamples(std::vector<Sample> &out, const std::chrono::milliseco
 * the destructor in .h file would not determine the overall size of object thus it needs to be done here where the PImpl type is completed.
 */
 Perun32::~Perun32() = default;
+
+std::string Perun32::Sample::channelIndexToCapLabel(const std::uint8_t channel_index)
+{
+    return channel_index < 32 ? EegData::layout32.label[channel_index] : std::string{};
+}

@@ -15,14 +15,14 @@ static void printSample(const Perun32::Sample &s, const std::uint32_t prev_ts_us
     const std::uint32_t dt = first ? 0 : ((s.device_timestamp_us - prev_ts_us) & 0xFFFFFF);
 
     std::cout << "ts=" << s.device_timestamp_us
-              << " dt=" << dt
-              << " ev=0x" << std::hex << std::setw(2) << std::setfill('0') << int(s.events)
-              << std::dec << std::setfill(' ') << '\n';
+            << " dt=" << dt
+            << " ev=0x" << std::hex << std::setw(2) << std::setfill('0') << int(s.events)
+            << std::dec << std::setfill(' ') << '\n';
 
     // 24 EEG channels, 6 per line, then 8 aux
     for (std::size_t i = 0; i < s.channels.size(); i++)
     {
-        std::cout << std::setw(8) << "asd" << "=" << std::setw(9) << s.channels[i];
+        std::cout << std::setw(8) << Perun32::Sample::channelIndexToCapLabel(i) << "=" << std::setw(9) << s.channels[i];
         if ((i + 1) % 6 == 0 || i + 1 == s.channels.size())
         {
             std::cout << '\n';
@@ -32,7 +32,7 @@ static void printSample(const Perun32::Sample &s, const std::uint32_t prev_ts_us
 
 int main()
 {
-    Perun32 lib(kVID, kPID);
+    const Perun32 lib(kVID, kPID);
     auto result = lib.connect();
 
     result = lib.stopAcquisition();
@@ -53,11 +53,12 @@ int main()
         {
             if (false == lib.readSamples(samples, 200ms))
             {
+                std::cout << "Failed to read samples!\n";
                 continue;
             }
             for (const auto &s: samples)
             {
-                if (total < 20) // print only the first 20, not thousands
+                if (total < 20)
                 {
                     printSample(s, prev_ts, first);
                 }
@@ -67,6 +68,7 @@ int main()
             }
         }
         result = lib.stopAcquisition();
+        std::cout << "TOTAL SAMPLES GOT: " << total << "\n";
         int a = 3;
     }
 

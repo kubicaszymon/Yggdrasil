@@ -69,6 +69,7 @@ public:
     */
         static constexpr std::size_t EEG_CHANNELS = 24;
         static constexpr std::size_t AUX_CHANNELS = 8;
+        [[nodiscard]] static std::string channelIndexToCapLabel(std::uint8_t channel_index);
 
         std::uint32_t device_timestamp_us{}; // 24 bits
         std::uint8_t events{};
