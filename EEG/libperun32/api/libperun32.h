@@ -7,6 +7,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -71,7 +72,7 @@ public:
         static constexpr std::size_t AUX_CHANNELS = 8;
         [[nodiscard]] static std::string channelIndexToCapLabel(std::uint8_t channel_index);
 
-        std::uint32_t device_timestamp_us{}; // 24 bits
+        double timestamp{}; // acquisition time in seconds, on the clock given to startAcquisition
         std::uint8_t events{};
         std::array<std::int32_t, 32> channels{};
     };
@@ -125,9 +126,13 @@ public:
     [[nodiscard]] bool setSamplingRate(SamplingRate sampling_rate, bool impedance_mode = false) const;
 
     /*
-     * @brief
-    */
-    [[nodiscard]] bool startAcquisition() const;
+     * @brief Starts the acquisition.
+     * @param clock Function returning the current time in seconds. It has to be monotonic.
+     * The library matches the amplifier time with this clock right before the start, and then
+     * Sample::timestamp of every sample is given on this clock. Pass for example lsl::local_clock
+     * to get timestamps ready for lsl push_sample.
+     */
+    [[nodiscard]] bool startAcquisition(const std::function<double()> &clock) const;
 
     /*
     * @brief

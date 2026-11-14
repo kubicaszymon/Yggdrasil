@@ -7,6 +7,7 @@
 #include <chrono>
 #include <thread>
 
+
 Perun32::pImplPerun32::pImplPerun32(const uint16_t vid, const uint16_t pid)
     : amp_details{.vid_ = vid, .pid_ = pid} {}
 
@@ -118,7 +119,7 @@ void Perun32::pImplPerun32::disconnect()
 bool Perun32::pImplPerun32::readSamples(std::vector<Sample> &out, const std::chrono::milliseconds timeout)
 {
     out.clear();
-    std::vector<std::uint8_t> chunk;
+    std::vector<std::uint8_t> chunk{};
     if (false == stream_.read(chunk, timeout))
     {
         return false;
@@ -127,7 +128,7 @@ bool Perun32::pImplPerun32::readSamples(std::vector<Sample> &out, const std::chr
     return true;
 }
 
-bool Perun32::pImplPerun32::start()
+bool Perun32::pImplPerun32::start(const std::function<double()> &clock)
 {
     // Idle state of course required
     if (State::IDLE != state_)
@@ -140,6 +141,20 @@ bool Perun32::pImplPerun32::start()
     if (SamplingRate::Undefined == communication_details.sampling_rate)
     {
         last_error_ = "undefined sampling rate";
+        return false;
+    }
+
+    if (false == static_cast<bool>(clock))
+    {
+        last_error_ = "clock function not given";
+        return false;
+    }
+
+    // Match amp clock with the given clock right before the acquisition starts
+    std::uint32_t amp0_us{};
+    double pi0_s{};
+    if (false == matchClocks(clock, amp0_us, pi0_s))
+    {
         return false;
     }
 
@@ -157,6 +172,7 @@ bool Perun32::pImplPerun32::start()
 
     if (true == ok)
     {
+        parser_.start(amp0_us, pi0_s);
         stream_.reset();
         ok = stream_.prepareAndSubmitTransfers(device_handle_);
     }
@@ -238,7 +254,8 @@ bool Perun32::pImplPerun32::setSamplingRate(const SamplingRate sampling_rate, co
     return true;
 }
 
-bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_data)
+bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_data,
+                                              std::vector<std::uint8_t> *response)
 {
     int transferred{0};
     // send command to bulk OUT endpoint
@@ -288,7 +305,17 @@ bool Perun32::pImplPerun32::sendCommandByBulk(const Commands::Command *command_d
     }
 
     // MISMATCHES allowed value according to Braintech's driver
-    return mismatches == 0;
+    if (0 != mismatches)
+    {
+        return false;
+    }
+
+    if (nullptr != response)
+    {
+        response_buffer.resize(command_data->data_in.size());
+        *response = std::move(response_buffer);
+    }
+    return true;
 }
 
 bool Perun32::pImplPerun32::abortStreaming()
@@ -372,16 +399,25 @@ bool Perun32::pImplPerun32::powerOnADCs()
     return false;
 }
 
-bool Perun32::pImplPerun32::syncDeviceClock()
+bool Perun32::pImplPerun32::matchClocks(const std::function<double()> &clock, std::uint32_t &amp0_us, double &pi0_s)
 {
-    if (false == sendCommandByBulk(&Commands::GetTime))
+    // The amp read its counter somewhere between us sending the command and getting the answer,
+    // so as the clock time we take the middle (the Braintech driver does the same)
+    std::vector<std::uint8_t> response;
+    const double before_s = clock();
+    if (false == sendCommandByBulk(&Commands::GetTime, &response))
     {
         return false;
     }
+    const double after_s = clock();
 
-    const auto now = std::chrono::high_resolution_clock::now();
-    host_sync_timestamp_us_ = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-
+    // The counter is in the low 4 bits of response bytes 1..6, least significant nibble first
+    amp0_us = 0;
+    for (int nibble = 0; nibble < 6; nibble++)
+    {
+        amp0_us |= static_cast<std::uint32_t>(response[1 + nibble] & 0x0F) << (4 * nibble);
+    }
+    pi0_s = (before_s + after_s) / 2.0;
     return true;
 }
 

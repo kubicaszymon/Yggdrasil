@@ -34,9 +34,9 @@ bool Perun32::setSamplingRate(const SamplingRate sampling_rate, const bool imped
     return pImpl->setSamplingRate(sampling_rate, impedance_mode);
 }
 
-bool Perun32::startAcquisition() const
+bool Perun32::startAcquisition(const std::function<double()> &clock) const
 {
-    return pImpl->start();
+    return pImpl->start(clock);
 }
 
 bool Perun32::stopAcquisition() const

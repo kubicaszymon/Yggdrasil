@@ -13,6 +13,7 @@
 #include "EegParser.h"
 
 #include <condition_variable>
+#include <functional>
 
 class Perun32::pImplPerun32
 {
@@ -25,7 +26,7 @@ public:
 
     bool readSamples(std::vector<Sample> &out, std::chrono::milliseconds timeout);
 
-    bool start();
+    bool start(const std::function<double()> &clock);
     bool stop();
 
     bool setSamplingRate(SamplingRate sampling_rate, bool impedance_mode = false);
@@ -39,10 +40,12 @@ private:
     bool evaluateDeviceResponse(const int &response);
 
     bool powerOnADCs();
-    bool syncDeviceClock();
+    // Reads amp counter and the given clock at the same moment
+    bool matchClocks(const std::function<double()> &clock, std::uint32_t &amp0_us, double &pi0_s);
 
     bool setAltSetting(AltSetting alt);
-    bool sendCommandByBulk(const Commands::Command *command_data);
+    // If response is given, it gets the bytes sent back by the device
+    bool sendCommandByBulk(const Commands::Command *command_data, std::vector<std::uint8_t> *response = nullptr);
 
     bool abortStreaming();
 
@@ -51,8 +54,6 @@ private:
 
     libusb_device_handle *device_handle_{nullptr};
     std::string last_error_{};
-
-    int64_t host_sync_timestamp_us_{};
 
     IsoStream stream_{};
     EegParser parser_{};

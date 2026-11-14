@@ -5,15 +5,28 @@
 #include "../include/EegParser.h"
 #include "definitions.h"
 
+void EegParser::start(const std::uint32_t amp0_us, const double pi0_s)
+{
+    reset();
+    pi0_s_ = pi0_s;
+    last_amp_us_ = amp0_us;
+    elapsed_us_ = 0;
+}
+
 void EegParser::push(const std::vector<std::uint8_t> &chunk, std::vector<Perun32::Sample> &out)
 {
     buffer_.insert(buffer_.end(), chunk.begin(), chunk.end());
     std::size_t pos{0};
+    // Check whether we already have full frame or we need to collect more chunks to have one
     while (buffer_.size() - pos >= IsoCommunication::FRAME_SIZE)
     {
+        // Put to parse pointer that points to the start of each frame
         out.push_back(parseFrame(buffer_.data() + pos));
+        // pos will always point at the start of entire frame
         pos += IsoCommunication::FRAME_SIZE;
     }
+    // Erase from buffer parsed fragment
+    // If we didn't parse anything then pos = 0 so we won't erase anything but wait for more data
     buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(pos));
 }
 
@@ -21,7 +34,12 @@ Perun32::Sample EegParser::parseFrame(const std::uint8_t *data)
 {
     Perun32::Sample sample;
 
-    sample.device_timestamp_us = data[0] | (data[1] << 8) | (data[2] << 16);
+    // The amp counter has 24 bits and wraps every 16.78 s, so we only add the difference to the previous reading
+    const std::uint32_t amp_us = data[0] | (data[1] << 8) | (data[2] << 16);
+    elapsed_us_ += (amp_us - last_amp_us_) & 0xFFFFFF;
+    last_amp_us_ = amp_us;
+    // spacing from the amp, place on the timeline from pi0
+    sample.timestamp = pi0_s_ + static_cast<double>(elapsed_us_) * 1e-6;
     sample.events = static_cast<std::uint8_t>(data[3] ^ 0x0F);
     data += 4;
 
