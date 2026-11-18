@@ -17,7 +17,7 @@ public:
     EegParser(const EegParser &) = delete;
 
     // Call before every acquisition. amp0_us - amp counter and pi0_s - pi clock, both read at the same moment
-    void start(std::uint32_t amp0_us, double pi0_s);
+    void start(std::uint32_t amp_start_time_us, double pi_start_time_s);
 
     // In - raw sample, Out - Sample struct
     void push(const std::vector<std::uint8_t> &chunk, std::vector<Perun32::Sample> &out);
@@ -29,7 +29,7 @@ private:
     void reset();
 
     std::vector<std::uint8_t> buffer_{};
-    double pi0_s_{0.0};
+    double pi_start_time_s_{0.0};
     std::uint32_t last_amp_us_{0}; // last 24 bit amp counter reading
     std::uint64_t elapsed_us_{0}; // amp time since amp0, never wraps
 

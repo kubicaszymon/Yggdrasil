@@ -5,11 +5,11 @@
 #include "../include/EegParser.h"
 #include "definitions.h"
 
-void EegParser::start(const std::uint32_t amp0_us, const double pi0_s)
+void EegParser::start(const std::uint32_t amp_start_time_us, const double pi_start_time_s)
 {
     reset();
-    pi0_s_ = pi0_s;
-    last_amp_us_ = amp0_us;
+    pi_start_time_s_ = pi_start_time_s;
+    last_amp_us_ = amp_start_time_us;
     elapsed_us_ = 0;
 }
 
@@ -38,8 +38,8 @@ Perun32::Sample EegParser::parseFrame(const std::uint8_t *data)
     const std::uint32_t amp_us = data[0] | (data[1] << 8) | (data[2] << 16);
     elapsed_us_ += (amp_us - last_amp_us_) & 0xFFFFFF;
     last_amp_us_ = amp_us;
-    // spacing from the amp, place on the timeline from pi0
-    sample.timestamp = pi0_s_ + static_cast<double>(elapsed_us_) * 1e-6;
+
+    sample.timestamp = pi_start_time_s_ + static_cast<double>(elapsed_us_) * 1e-6;
     sample.events = static_cast<std::uint8_t>(data[3] ^ 0x0F);
     data += 4;
 

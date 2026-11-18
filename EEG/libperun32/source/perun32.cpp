@@ -151,9 +151,9 @@ bool Perun32::pImplPerun32::start(const std::function<double()> &clock)
     }
 
     // Match amp clock with the given clock right before the acquisition starts
-    std::uint32_t amp0_us{};
-    double pi0_s{};
-    if (false == matchClocks(clock, amp0_us, pi0_s))
+    std::uint32_t amp_start_time_us{};
+    double pi_start_time_s{};
+    if (false == matchClocks(clock, amp_start_time_us, pi_start_time_s))
     {
         return false;
     }
@@ -172,7 +172,7 @@ bool Perun32::pImplPerun32::start(const std::function<double()> &clock)
 
     if (true == ok)
     {
-        parser_.start(amp0_us, pi0_s);
+        parser_.start(amp_start_time_us, pi_start_time_s);
         stream_.reset();
         ok = stream_.prepareAndSubmitTransfers(device_handle_);
     }
@@ -399,7 +399,7 @@ bool Perun32::pImplPerun32::powerOnADCs()
     return false;
 }
 
-bool Perun32::pImplPerun32::matchClocks(const std::function<double()> &clock, std::uint32_t &amp0_us, double &pi0_s)
+bool Perun32::pImplPerun32::matchClocks(const std::function<double()> &clock, std::uint32_t &amp_start_time_us, double &pi_start_time_s)
 {
     // The amp read its counter somewhere between us sending the command and getting the answer,
     // so as the clock time we take the middle (the Braintech driver does the same)
@@ -412,12 +412,12 @@ bool Perun32::pImplPerun32::matchClocks(const std::function<double()> &clock, st
     const double after_s = clock();
 
     // The counter is in the low 4 bits of response bytes 1..6, least significant nibble first
-    amp0_us = 0;
+    amp_start_time_us = 0;
     for (int nibble = 0; nibble < 6; nibble++)
     {
-        amp0_us |= static_cast<std::uint32_t>(response[1 + nibble] & 0x0F) << (4 * nibble);
+        amp_start_time_us |= static_cast<std::uint32_t>(response[1 + nibble] & 0x0F) << (4 * nibble);
     }
-    pi0_s = (before_s + after_s) / 2.0;
+    pi_start_time_s = (before_s + after_s) / 2.0;
     return true;
 }
 

@@ -41,7 +41,7 @@ private:
 
     bool powerOnADCs();
     // Reads amp counter and the given clock at the same moment
-    bool matchClocks(const std::function<double()> &clock, std::uint32_t &amp0_us, double &pi0_s);
+    bool matchClocks(const std::function<double()> &clock, std::uint32_t &amp_start_time_us, double &pi_start_time_s);
 
     bool setAltSetting(AltSetting alt);
     // If response is given, it gets the bytes sent back by the device
